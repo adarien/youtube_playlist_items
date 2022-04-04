@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/mattn/go-colorable"
 	"github.com/sirupsen/logrus"
@@ -24,7 +23,7 @@ import (
 func getToken(config *oauth2.Config) (*oauth2.Token, error) {
 	cacheFile, err := getPathTokenCacheFile()
 	if err != nil {
-		err := errors.New(fmt.Sprintf("unable to get path to cached credential file: %s", err))
+		err := fmt.Errorf("unable to get path to cached credential file: %s", err)
 		return nil, err
 	}
 
@@ -52,13 +51,13 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 
 	var code string
 	if _, err := fmt.Scan(&code); err != nil {
-		err = errors.New(fmt.Sprintf("unable to read authorization code: %s", err))
+		err = fmt.Errorf("unable to read authorization code: %s", err)
 		return nil, err
 	}
 
 	token, err := config.Exchange(context.Background(), code)
 	if err != nil {
-		err = errors.New(fmt.Sprintf("unable to retrieve token from web: %s", err))
+		err = fmt.Errorf("unable to retrieve token from web: %s", err)
 		return nil, err
 	}
 
@@ -95,7 +94,7 @@ func getTokenFromFile(file string) (*oauth2.Token, error) {
 		}
 	}()
 	if err != nil {
-		err = errors.New(fmt.Sprintf("unable to close file: %s", err))
+		err = fmt.Errorf("unable to close file: %s", err)
 		return nil, err
 	}
 
@@ -110,7 +109,7 @@ func saveToken(file string, token *oauth2.Token) error {
 	fmt.Printf("Saving credential file to: %s\n", file)
 	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		err = errors.New(fmt.Sprintf("unable to cache oauth token: %s", err))
+		err = fmt.Errorf("unable to cache oauth token: %s", err)
 		return err
 	}
 
@@ -121,7 +120,7 @@ func saveToken(file string, token *oauth2.Token) error {
 		}
 	}()
 	if err != nil {
-		err = errors.New(fmt.Sprintf("unable to close file: %s", err))
+		err = fmt.Errorf("unable to close file: %s", err)
 		return err
 	}
 
@@ -144,7 +143,7 @@ func getPlaylistsInfo(service *youtube.Service, part []string, channelId string)
 
 	response, err := call.Do()
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("getPlaylistsInfo not call: %v", err))
+		return nil, fmt.Errorf("getPlaylistsInfo not call: %v", err)
 	}
 
 	return response, nil
@@ -156,10 +155,10 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 
 	response, err := call.Do()
 	if err != nil {
-		return errors.New(fmt.Sprintf("channel not call: %v", err))
+		return fmt.Errorf("channel not call: %v", err)
 	}
 	if len(response.Items) == 0 {
-		return errors.New(fmt.Sprintf("incorrect userName"))
+		return fmt.Errorf("incorrect userName")
 	}
 
 	channelID := response.Items[0].Id
@@ -188,7 +187,7 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 			playlistResponse, err := playlistCall.Do()
 
 			if err != nil {
-				return errors.New(fmt.Sprintf("error fetching playlist items: %s", err))
+				return fmt.Errorf("error fetching playlist items: %s", err)
 			}
 
 			for _, playlistItem := range playlistResponse.Items {
@@ -247,34 +246,34 @@ func Run() error {
 	ctx := context.Background()
 	viper.SetConfigFile(".env")
 	if err := viper.ReadInConfig(); err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to read .env file - - - : %s", err))
+		return fmt.Errorf(" - - - unable to read .env file - - - : %s", err)
 	}
 	CredentialFilePath := viper.GetString("CREDENTIAL_FILEPATH")
 	userName := viper.GetString("USERNAME")
 
 	cs, err := initCredential(CredentialFilePath)
 	if err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to read client secret file - - - : %s", err))
+		return fmt.Errorf(" - - - unable to read client secret file - - - : %s", err)
 	}
 
 	config, err := google.ConfigFromJSON(cs, youtube.YoutubeReadonlyScope)
 	if err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to parse client secret file to config - - - : %s", err))
+		return fmt.Errorf(" - - - unable to parse client secret file to config - - - : %s", err)
 	}
 	token, err := getToken(config)
 	if err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to get token - - - : %s", err))
+		return fmt.Errorf(" - - - unable to get token - - - : %s", err)
 	}
 
 	service, err := youtube.NewService(ctx, option.WithTokenSource(config.TokenSource(ctx, token)))
 	if err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to create client - - - : %s", err))
+		return fmt.Errorf(" - - - unable to create client - - - : %s", err)
 	}
 
 	part := []string{"snippet", "contentDetails"}
 	err = channelsListByUsername(service, part, userName)
 	if err != nil {
-		return errors.New(fmt.Sprintf(" - - - unable to get channel list - - - : %s", err))
+		return fmt.Errorf(" - - - unable to get channel list - - - : %s", err)
 	}
 
 	return nil
