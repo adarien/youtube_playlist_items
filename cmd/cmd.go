@@ -149,7 +149,7 @@ func getPlaylistsInfo(service *youtube.Service, part []string, channelId string)
 	return response, nil
 }
 
-func channelsListByUsername(service *youtube.Service, part []string, forUsername string) error {
+func getChannelsListsByUsername(service *youtube.Service, part []string, forUsername string) error {
 	call := service.Channels.List(part)
 	call = call.ForUsername(forUsername)
 
@@ -161,6 +161,7 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 		return fmt.Errorf("incorrect userName")
 	}
 
+	// TODO: to another func (getListsID)
 	channelID := response.Items[0].Id
 	parts := []string{"snippet", "contentDetails"}
 	response2, err := getPlaylistsInfo(service, parts, channelID)
@@ -179,6 +180,7 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 		i := 0
 		nextPageToken := ""
 		for {
+			// TODO: to another func (getListItems)
 			playlistCall := service.PlaylistItems.List([]string{"snippet"}).
 				PlaylistId(playlist.Id).
 				MaxResults(50).
@@ -190,6 +192,8 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 				return fmt.Errorf("error fetching playlist items: %s", err)
 			}
 
+			// TODO: to another func (getItemInfo)
+			// TODO: create struct
 			for _, playlistItem := range playlistResponse.Items {
 				title := playlistItem.Snippet.Title
 				videoId := playlistItem.Snippet.ResourceId.VideoId
@@ -198,6 +202,7 @@ func channelsListByUsername(service *youtube.Service, part []string, forUsername
 				videoOwnerChannelTitle := playlistItem.Snippet.VideoOwnerChannelTitle
 				videoOwnerChannelId := playlistItem.Snippet.VideoOwnerChannelId
 
+				// TODO: record to DB
 				fmt.Printf("%4d :: %11v :: %v :: %v :: %v :: %v :: %v\r\n", i,
 					videoId, title, position, publishedAt, videoOwnerChannelTitle, videoOwnerChannelId)
 				i++
@@ -271,7 +276,7 @@ func Run() error {
 	}
 
 	part := []string{"snippet", "contentDetails"}
-	err = channelsListByUsername(service, part, userName)
+	err = getChannelsListsByUsername(service, part, userName)
 	if err != nil {
 		return fmt.Errorf(" - - - unable to get channel list - - - : %s", err)
 	}
