@@ -134,7 +134,8 @@ func saveToken(file string, token *oauth2.Token) error {
 
 // getPlaylistsInfo get playlists information
 // It returns PlaylistListResponse struct and any error encountered.
-func getPlaylistsInfo(service *youtube.Service, part []string, channelId string) (*youtube.PlaylistListResponse, error) {
+func getPlaylistsInfo(service *youtube.Service, channelId string) (*youtube.PlaylistListResponse, error) {
+	part := []string{"snippet", "contentDetails"}
 	call := service.Playlists.List(part)
 	if channelId != "" {
 		call = call.ChannelId(channelId)
@@ -149,64 +150,71 @@ func getPlaylistsInfo(service *youtube.Service, part []string, channelId string)
 	return response, nil
 }
 
-func getChannelsListsByUsername(service *youtube.Service, part []string, forUsername string) error {
+func getChannelsLists(service *youtube.Service, part []string, username string) (*youtube.ChannelListResponse, error) {
 	call := service.Channels.List(part)
-	call = call.ForUsername(forUsername)
+	call = call.ForUsername(username)
 
 	response, err := call.Do()
 	if err != nil {
-		return fmt.Errorf("channel not call: %v", err)
+		return nil, fmt.Errorf("channel not call: %v", err)
 	}
 	if len(response.Items) == 0 {
-		return fmt.Errorf("incorrect userName")
+		return nil, fmt.Errorf("incorrect userName")
 	}
 
-	// TODO: to another func (getListsID)
+	return response, nil
+}
+
+func getListsID(service *youtube.Service, response *youtube.ChannelListResponse) ([]string, error) {
 	channelID := response.Items[0].Id
-	parts := []string{"snippet", "contentDetails"}
-	response2, err := getPlaylistsInfo(service, parts, channelID)
+	response2, err := getPlaylistsInfo(service, channelID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	for i, playlist := range response2.Items {
-		playlistId := playlist.Id
-		playlistTitle := playlist.Snippet.Title
+	var playlists []string
+	for _, playlist := range response2.Items {
+		if playlist.Snippet.Title != "Favorites" {
+			playlists = append(playlists, playlist.Id)
+		}
+	}
 
-		fmt.Println("== ================================== =")
-		fmt.Printf("%2d %s : %s\n", i, playlistId, playlistTitle)
-		fmt.Println("== ================================== =")
+	return playlists, nil
+}
 
-		i := 0
-		nextPageToken := ""
+func getItemInfo(playlistResponse *youtube.PlaylistItemListResponse) {
+	// TODO: create struct
+	for _, playlistItem := range playlistResponse.Items {
+		title := playlistItem.Snippet.Title
+		videoId := playlistItem.Snippet.ResourceId.VideoId
+		position := playlistItem.Snippet.Position
+		publishedAt := playlistItem.Snippet.PublishedAt
+		videoOwnerChannelTitle := playlistItem.Snippet.VideoOwnerChannelTitle
+		videoOwnerChannelId := playlistItem.Snippet.VideoOwnerChannelId
+		placeInList := playlistItem.Snippet.Position
+
+		// TODO: record to DB
+		fmt.Printf("%4d :: %11v :: %v :: %v :: %v :: %v :: %v\r\n", placeInList,
+			videoId, title, position, publishedAt, videoOwnerChannelTitle, videoOwnerChannelId)
+	}
+}
+
+func getListItems(service *youtube.Service, playlistsID []string) error {
+	nextPageToken := ""
+	for _, ID := range playlistsID {
+		fmt.Println(ID)
 		for {
-			// TODO: to another func (getListItems)
 			playlistCall := service.PlaylistItems.List([]string{"snippet"}).
-				PlaylistId(playlist.Id).
+				PlaylistId(ID).
 				MaxResults(50).
 				PageToken(nextPageToken)
 
 			playlistResponse, err := playlistCall.Do()
-
 			if err != nil {
 				return fmt.Errorf("error fetching playlist items: %s", err)
 			}
 
-			// TODO: to another func (getItemInfo)
-			// TODO: create struct
-			for _, playlistItem := range playlistResponse.Items {
-				title := playlistItem.Snippet.Title
-				videoId := playlistItem.Snippet.ResourceId.VideoId
-				position := playlistItem.Snippet.Position
-				publishedAt := playlistItem.Snippet.PublishedAt
-				videoOwnerChannelTitle := playlistItem.Snippet.VideoOwnerChannelTitle
-				videoOwnerChannelId := playlistItem.Snippet.VideoOwnerChannelId
-
-				// TODO: record to DB
-				fmt.Printf("%4d :: %11v :: %v :: %v :: %v :: %v :: %v\r\n", i,
-					videoId, title, position, publishedAt, videoOwnerChannelTitle, videoOwnerChannelId)
-				i++
-			}
+			getItemInfo(playlistResponse)
 
 			nextPageToken = playlistResponse.NextPageToken
 			if nextPageToken == "" {
@@ -265,6 +273,7 @@ func Run() error {
 	if err != nil {
 		return fmt.Errorf(" - - - unable to parse client secret file to config - - - : %s", err)
 	}
+
 	token, err := getToken(config)
 	if err != nil {
 		return fmt.Errorf(" - - - unable to get token - - - : %s", err)
@@ -276,9 +285,19 @@ func Run() error {
 	}
 
 	part := []string{"snippet", "contentDetails"}
-	err = getChannelsListsByUsername(service, part, userName)
+	resp, err := getChannelsLists(service, part, userName)
 	if err != nil {
 		return fmt.Errorf(" - - - unable to get channel list - - - : %s", err)
+	}
+
+	IDs, err := getListsID(service, resp)
+	if err != nil {
+		return fmt.Errorf(" - - - unable to get playlists ID - - - : %s", err)
+	}
+
+	err = getListItems(service, IDs)
+	if err != nil {
+		return fmt.Errorf(" - - - unable to get playlists Items - - - : %s", err)
 	}
 
 	return nil
