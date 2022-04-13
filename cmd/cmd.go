@@ -1,8 +1,10 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "github.com/lib/pq"
 	"github.com/mattn/go-colorable"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -16,6 +18,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 )
 
 // getToken uses a Context and Config to retrieve a Token.
@@ -165,47 +168,77 @@ func getChannelsLists(service *youtube.Service, part []string, username string) 
 	return response, nil
 }
 
-func getListsID(service *youtube.Service, response *youtube.ChannelListResponse) ([]string, error) {
+type playlistMeta struct {
+	ID    string
+	Title string
+	Count int64
+}
+
+func getListsID(service *youtube.Service, response *youtube.ChannelListResponse) ([]playlistMeta, error) {
 	channelID := response.Items[0].Id
 	response2, err := getPlaylistsInfo(service, channelID)
 	if err != nil {
 		return nil, err
 	}
 
-	var playlists []string
+	var playlists []playlistMeta
 	for _, playlist := range response2.Items {
 		if playlist.Snippet.Title != "Favorites" {
-			playlists = append(playlists, playlist.Id)
+			meta := playlistMeta{}
+			meta.ID = playlist.Id
+			meta.Title = playlist.Snippet.Title
+			meta.Count = playlist.ContentDetails.ItemCount
+			playlists = append(playlists, meta)
 		}
 	}
 
 	return playlists, nil
 }
 
-func getItemInfo(playlistResponse *youtube.PlaylistItemListResponse) {
-	// TODO: create struct
-	for _, playlistItem := range playlistResponse.Items {
-		title := playlistItem.Snippet.Title
-		videoId := playlistItem.Snippet.ResourceId.VideoId
-		position := playlistItem.Snippet.Position
-		publishedAt := playlistItem.Snippet.PublishedAt
-		videoOwnerChannelTitle := playlistItem.Snippet.VideoOwnerChannelTitle
-		videoOwnerChannelId := playlistItem.Snippet.VideoOwnerChannelId
-		placeInList := playlistItem.Snippet.Position
+type TrackInfo struct {
+	PlaylistTitle          string    `json:"playlistName,omitempty"`
+	VideoID                string    `json:"videoId,omitempty"`
+	TrackTitle             string    `json:"title,omitempty"`
+	PublishedAt            string    `json:"publishedAt,omitempty"`
+	VideoOwnerChannelTitle string    `json:"videoOwnerChannelTitle,omitempty"`
+	VideoOwnerChannelId    string    `json:"videoOwnerChannelId,omitempty"`
+	PlaylistID             string    `json:"playlistid,omitempty"`
+	Position               int64     `json:"position,omitempty"`
+	Created                time.Time `json:"created,omitempty"`
+}
 
-		// TODO: record to DB
-		fmt.Printf("%4d :: %11v :: %v :: %v :: %v :: %v :: %v\r\n", placeInList,
-			videoId, title, position, publishedAt, videoOwnerChannelTitle, videoOwnerChannelId)
+func getItemInfo(conn *ServiceSQL, playlistResponse *youtube.PlaylistItemListResponse, meta playlistMeta) {
+	for _, playlistItem := range playlistResponse.Items {
+		oi := TrackInfo{}
+		oi.PlaylistTitle = meta.Title
+		oi.VideoID = playlistItem.Snippet.ResourceId.VideoId
+		oi.TrackTitle = playlistItem.Snippet.Title
+		oi.PublishedAt = playlistItem.Snippet.PublishedAt
+		oi.VideoOwnerChannelTitle = playlistItem.Snippet.VideoOwnerChannelTitle
+		oi.VideoOwnerChannelId = playlistItem.Snippet.VideoOwnerChannelId
+		oi.PlaylistID = meta.ID
+		oi.Position = playlistItem.Snippet.Position
+
+		// fmt.Println(oi)
+		// fmt.Println(oi.VideoID)
+
+		// record to DB
+		err := conn.PostProduct(oi)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 
-func getListItems(service *youtube.Service, playlistsID []string) error {
+func getListItems(service *youtube.Service, playlistMeta []playlistMeta) error {
 	nextPageToken := ""
-	for _, ID := range playlistsID {
-		fmt.Println(ID)
+	conn := New()
+
+	for _, meta := range playlistMeta {
+		fmt.Print(meta.Title, " ", meta.Count)
 		for {
 			playlistCall := service.PlaylistItems.List([]string{"snippet"}).
-				PlaylistId(ID).
+				PlaylistId(meta.ID).
 				MaxResults(50).
 				PageToken(nextPageToken)
 
@@ -214,7 +247,7 @@ func getListItems(service *youtube.Service, playlistsID []string) error {
 				return fmt.Errorf("error fetching playlist items: %s", err)
 			}
 
-			getItemInfo(playlistResponse)
+			getItemInfo(conn, playlistResponse, meta)
 
 			nextPageToken = playlistResponse.NextPageToken
 			if nextPageToken == "" {
@@ -290,12 +323,12 @@ func Run() error {
 		return fmt.Errorf(" - - - unable to get channel list - - - : %s", err)
 	}
 
-	IDs, err := getListsID(service, resp)
+	meta, err := getListsID(service, resp)
 	if err != nil {
 		return fmt.Errorf(" - - - unable to get playlists ID - - - : %s", err)
 	}
 
-	err = getListItems(service, IDs)
+	err = getListItems(service, meta)
 	if err != nil {
 		return fmt.Errorf(" - - - unable to get playlists Items - - - : %s", err)
 	}
@@ -310,4 +343,66 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+type DB struct {
+	DB *sql.DB
+}
+
+type ServiceSQL struct {
+	db *DB
+}
+
+func New() *ServiceSQL {
+	dbClient := Connect()
+	return &ServiceSQL{db: dbClient}
+}
+
+func Connect() *DB {
+	viper.SetConfigFile(".env")
+	if err := viper.ReadInConfig(); err != nil {
+		logrus.Fatal(err)
+	}
+
+	driverName := viper.GetString("DRIVER")
+	host := viper.GetString("HOST")
+	port := viper.GetString("PORT")
+	userName := viper.GetString("USER")
+	dbname := viper.GetString("DBNAME")
+	sslMode := viper.GetString("SSLMODE")
+	password := viper.GetString("PASSWORD")
+
+	dataSourceName := fmt.Sprintf("host=%s port=%s user=%s dbname=%s sslmode=%s password=%s",
+		host, port, userName, dbname, sslMode, password)
+	// fmt.Println(dataSourceName)
+	db, err := sql.Open(driverName, dataSourceName)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+
+	return &DB{DB: db}
+}
+
+func (db *DB) InsertProductDB(ti TrackInfo) error {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := "insert into playlists_info (playlisttitle, position, videoid, tracktitle, publishedat, playlistid, videoownerchannelid, videoownerchanneltitle) values ($1, $2, $3, $4, $5, $6, $7, $8)"
+	_, err = tx.Exec(query, ti.PlaylistTitle, ti.Position, ti.VideoID, ti.TrackTitle, ti.PublishedAt, ti.PlaylistID, ti.VideoOwnerChannelId, ti.VideoOwnerChannelTitle)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *ServiceSQL) PostProduct(ti TrackInfo) error {
+	err := s.db.InsertProductDB(ti)
+	if err != nil {
+		return fmt.Errorf(" - - - unable to write to DB - - - : %s", err)
+	}
+	return nil
 }
