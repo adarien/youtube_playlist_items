@@ -390,7 +390,7 @@ func (db *DB) InsertProductDB(ti TrackInfo) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := "insert into playlists_info (playlisttitle, position, videoid, tracktitle, publishedat, playlistid, videoownerchannelid, videoownerchanneltitle) values ($1, $2, $3, $4, $5, $6, $7, $8)"
+	query := "insert into playlists_info (playlist_title, position_in_playlist, video_id, track_title, published_at, playlist_id, video_owner_channel_id, video_owner_channel_title) values ($1, $2, $3, $4, $5, $6, $7, $8)"
 	_, err = tx.Exec(query, ti.PlaylistTitle, ti.Position, ti.VideoID, ti.TrackTitle, ti.PublishedAt, ti.PlaylistID, ti.VideoOwnerChannelId, ti.VideoOwnerChannelTitle)
 	if err != nil {
 		return err
@@ -406,3 +406,7 @@ func (s *ServiceSQL) PostProduct(ti TrackInfo) error {
 	}
 	return nil
 }
+
+// TODO: add number iteration of write to DB
+// TODO: clear architecture
+// TODO: search changes
